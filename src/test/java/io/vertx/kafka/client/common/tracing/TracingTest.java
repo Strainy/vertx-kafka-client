@@ -130,6 +130,39 @@ public class TracingTest extends KafkaClusterTestBase {
   }
 
   @Test
+  public void testTracingWithBatchHandler(TestContext ctx) {
+    String topicName = "TestTracing";
+    Properties pConf = kafkaCluster.useTo().getProducerProperties("testTracing_producer");
+    pConf.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+    pConf.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+    producer = producer(vertx, pConf);
+    producer.exceptionHandler(ctx::fail);
+    KafkaProducer<String, String> producer = new KafkaProducerImpl<>(this.vertx, this.producer);
+
+    Properties cConf = kafkaCluster.useTo().getConsumerProperties("testTracing_consumer", "testTracing_consumer", OffsetResetStrategy.EARLIEST);
+    cConf.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+    cConf.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+    consumer = KafkaReadStream.create(vertx, cConf);
+    consumer.exceptionHandler(ctx::fail);
+
+    int numMessages = 1000;
+    AtomicInteger expectedSpanCountOnContext = new AtomicInteger(numMessages);
+    consumer.batchHandler(rec -> {
+      Context currentContext = Vertx.currentContext();
+      ctx.assertNotNull(currentContext);
+      //String spanName = currentContext.getLocal(CONTEXT_CONSUMER_SPAN);
+      //ctx.assertEquals("span-" + expectedSpanCountOnContext.decrementAndGet(), spanName);
+    });
+    consumer.subscribe(Collections.singleton(topicName));
+
+    tracer.init(topicName, numMessages, numMessages);
+    for (int i = 0; i < numMessages; i++) {
+      producer.write(KafkaProducerRecord.create(topicName, "key-" + i, "value-" + i, 0));
+    }
+    tracer.assertAllDone(0);
+  }
+
+  @Test
   public void testTracingFailure(TestContext ctx) {
     Properties pConf = kafkaCluster.useTo().getProducerProperties("testTracing_producer");
     pConf.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
